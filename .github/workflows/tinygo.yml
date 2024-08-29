@@ -3,7 +3,7 @@ name: TinyGo
 
 on:
   push:
-    branches: ["main", "tinygo-ci"]
+    branches: ["main", "tinygo-ci", update-build-constraints-2]
   pull_request:
     branches: [main]
 
