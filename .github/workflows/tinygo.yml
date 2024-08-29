@@ -63,6 +63,8 @@ jobs:
       - name: Passes Compile
         run: |
 
+          /bin/sh --version
+
           cat << 'EOF' > /tmp/GNUmakefile
           space := $(eval) $(eval)
           FAILING := $(subst $(space),|,$(strip $(FAILING)))
