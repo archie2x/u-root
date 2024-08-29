@@ -85,7 +85,7 @@ jobs:
           make \
           -f /tmp/GNUmakefile \
           -k \
-          -j $(nproc)
+          -j $(nproc) \
           FAILING=$FAILING \
           DIRS="`echo cmds/{boot,core,exp,extra}/*`" \
           CMD="GOOS=linux GOARCH=amd64 tinygo build -tags noasm"
