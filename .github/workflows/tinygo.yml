@@ -63,7 +63,7 @@ jobs:
       - name: Passes Compile
         run: |
 
-          cat << 'EOF-' > /tmp/GNUmakefile
+          cat << 'EOF' > /tmp/GNUmakefile
           space := $(eval) $(eval)
           FAILING := $(subst $(space),|,$(strip $(FAILING)))
           .ONESHELL:
