@@ -63,7 +63,7 @@ jobs:
       - name: Passes Compile
         run: |
 
-          cat << 'EOF' > /tmp/GNUmakefile
+          cat << 'EOF-' > /tmp/GNUmakefile
           space := $(eval) $(eval)
           FAILING := $(subst $(space),|,$(strip $(FAILING)))
           .ONESHELL:
@@ -79,6 +79,8 @@ jobs:
           		[[ $${ECODE} == 0 ]] || exit 1
           	fi
           EOF
+          perl -pi -e 's/^\s{2}/\t/' /tmp/GNUmakefile
+          cat /tmp/GNUmakefile
 
           make \
           -f /tmp/GNUmakefile \
