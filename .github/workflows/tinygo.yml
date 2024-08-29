@@ -1,0 +1,106 @@
+---
+name: TinyGo
+
+on:
+  push:
+    branches: ["main", "tinygo-ci"]
+  pull_request:
+    branches: [main]
+
+env:
+  FAILING:
+    cmds/boot/boot
+    cmds/boot/fitboot
+    cmds/boot/pxeboot
+    cmds/core/dhclient
+    cmds/core/gosh
+    cmds/core/init
+    cmds/core/insmod
+    cmds/core/io
+    cmds/core/ip
+    cmds/core/kexec
+    cmds/core/lockmsrs
+    cmds/core/msr
+    cmds/core/netcat
+    cmds/core/netstat
+    cmds/core/nohup
+    cmds/core/ping
+    cmds/core/rmmod
+    cmds/core/sluinit
+    cmds/core/sshd
+    cmds/core/switch_root
+    cmds/core/tee
+    cmds/core/watchdogd
+    cmds/core/wget
+    cmds/exp/console
+    cmds/exp/esxiboot
+    cmds/exp/fbnetboot
+    cmds/exp/localboot
+    cmds/exp/modprobe
+    cmds/exp/netbootxyz
+    cmds/exp/newsshd
+    cmds/exp/pflask
+    cmds/exp/pxeserver
+    cmds/exp/systemboot
+    cmds/exp/tcpdump
+    cmds/exp/tftp
+    cmds/exp/traceroute
+    cmds/exp/uefiboot
+    cmds/exp/vboot
+    cmds/exp/vmboot
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: acifani/setup-tinygo@v2
+        with:
+          tinygo-version: '0.33.0'
+
+      - name: Passes Compile
+        run: |
+
+          # Build all commands known to compile
+          # pattern of all failing cmds in form ^(a|b|...)$
+          failpat="^($(echo -n $FAILING | tr ' ' '|'))\$"
+
+          failed=FALSE
+          for cmd in cmds/{boot,core,exp,extra}/* ; do
+            if [[ ! ${cmd} =~ ${failpat} ]] ; then
+              stdbuf -o0 printf "${cmd} "
+              (
+               cd ${cmd} &&
+               tinygo build -tags noasm && echo SUCCESS ||
+               (echo FAIL; failed=TRUE)
+              )
+            fi
+          done
+
+          # fail once
+          [[ ${failed} = "TRUE" ]] && exit 1
+
+      - name: Failing Compile
+        run: |
+
+          # Build all commands known to fail
+          # pattern of all failing cmds in form ^(a|b|...)$
+          failpat="^($(echo -n $FAILING | tr ' ' '|'))\$"
+
+          failed=FALSE
+          for cmd in cmds/{boot,core,exp,extra}/* ; do
+            if [[ ${cmd} =~ ${failpat} ]] ; then
+              stdbuf -o0 printf "${cmd} "
+              (
+               cd ${cmd} &&
+               tinygo build -tags noasm &&
+               (echo SUCCESS UNEXPECTED; failed=TRUE) ||
+               (echo FAIL EXPECTED)
+              )
+            fi
+          done
+
+          # fail once
+          [[ ${failed} = "TRUE" ]] && exit 1
