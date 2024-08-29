@@ -63,44 +63,27 @@ jobs:
       - name: Passes Compile
         run: |
 
-          # Build all commands known to compile
-          # pattern of all failing cmds in form ^(a|b|...)$
-          failpat="^($(echo -n $FAILING | tr ' ' '|'))\$"
+          cat << 'EOF' > /tmp/GNUmakefile
+          space := $(eval) $(eval)
+          FAILING := $(subst $(space),|,$(strip $(FAILING)))
+          .ONESHELL:
+          .PHONY: all $(DIRS)
+          all: $(DIRS)
+          $(DIRS):
+          cd $@
+          	${CMD}
+          	ECODE=$$?
+          	if [[ "${FAILING}" =~ "$@" ]]; then
+          		[[ $${ECODE} != 0 ]] || exit 1
+          	else
+          		[[ $${ECODE} == 0 ]] || exit 1
+          	fi
+          EOF
 
-          failed=FALSE
-          for cmd in cmds/{boot,core,exp,extra}/* ; do
-            if [[ ! ${cmd} =~ ${failpat} ]] ; then
-              stdbuf -o0 printf "${cmd} "
-              (
-               cd ${cmd} &&
-               tinygo build -tags noasm && echo SUCCESS ||
-               (echo FAIL; failed=TRUE)
-              )
-            fi
-          done
-
-          # fail once
-          [[ ${failed} = "TRUE" ]] && exit 1
-
-      - name: Failing Compile
-        run: |
-
-          # Build all commands known to fail
-          # pattern of all failing cmds in form ^(a|b|...)$
-          failpat="^($(echo -n $FAILING | tr ' ' '|'))\$"
-
-          failed=FALSE
-          for cmd in cmds/{boot,core,exp,extra}/* ; do
-            if [[ ${cmd} =~ ${failpat} ]] ; then
-              stdbuf -o0 printf "${cmd} "
-              (
-               cd ${cmd} &&
-               tinygo build -tags noasm &&
-               (echo SUCCESS UNEXPECTED; failed=TRUE) ||
-               (echo FAIL EXPECTED)
-              )
-            fi
-          done
-
-          # fail once
-          [[ ${failed} = "TRUE" ]] && exit 1
+          make \
+          -f /tmp/GNUmakefile \
+          -k \
+          -j $(nproc)
+          FAILING=$FAILING \
+          DIRS="`echo cmds/{boot,core,exp,extra}/*`" \
+          CMD="GOOS=linux GOARCH=amd64 tinygo build -tags noasm"
