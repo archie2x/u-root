@@ -63,13 +63,14 @@ jobs:
       - name: Passes Compile
         run: |
 
-          /bin/sh --version
+          /bin/bash --version
 
           cat << 'EOF' > /tmp/GNUmakefile
           space := $(eval) $(eval)
           FAILING := $(subst $(space),|,$(strip $(FAILING)))
           .ONESHELL:
           .PHONY: all $(DIRS)
+          SHELL = /bin/bash
           all: $(DIRS)
           $(DIRS):
             cd $@
