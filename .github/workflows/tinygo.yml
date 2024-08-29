@@ -71,13 +71,13 @@ jobs:
           all: $(DIRS)
           $(DIRS):
           cd $@
-          	${CMD}
-          	ECODE=$$?
-          	if [[ "${FAILING}" =~ "$@" ]]; then
-          		[[ $${ECODE} != 0 ]] || exit 1
-          	else
-          		[[ $${ECODE} == 0 ]] || exit 1
-          	fi
+            ${CMD}
+            ECODE=$$?
+            if [[ "${FAILING}" =~ "$@" ]]; then
+            [[ $${ECODE} != 0 ]] || exit 1
+            else
+            [[ $${ECODE} == 0 ]] || exit 1
+            fi
           EOF
           perl -pi -e 's/^\s{2}/\t/' /tmp/GNUmakefile
           cat /tmp/GNUmakefile
