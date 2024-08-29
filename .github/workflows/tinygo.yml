@@ -55,10 +55,10 @@ jobs:
       fail-fast: false
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: acifani/setup-tinygo@v2
-        with:
-          tinygo-version: '0.33.0'
+      # - uses: actions/checkout@v4
+      # - uses: acifani/setup-tinygo@v2
+      #   with:
+      #     tinygo-version: '0.33.0'
 
       - name: Passes Compile
         run: |
