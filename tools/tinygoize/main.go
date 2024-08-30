@@ -18,6 +18,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+	"runtime"
 )
 
 // Track set of passing, failing, and excluded commands
@@ -36,20 +38,63 @@ func tinygoVersion(tinygo *string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+type BuildResult struct {
+	dir      string
+	code     BuildCode
+	err      error
+}
+
+func worker(tinygo *string, tasks <-chan string, results chan<- BuildResult, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for dir := range tasks {
+		code, err := build(tinygo, dir)
+		// Send the result back to the main routine
+		results <- BuildResult {
+			dir:      dir,
+			code:      code,
+			err:      err,
+		}
+	}
+}
+
 // "tinygo build" in each of directories 'dirs'
 func buildDirs(tinygo *string, dirs []string) (status BuildStatus, err error) {
-	for _, dir := range dirs {
-		result, err := build(tinygo, dir)
-		if err != nil {
+	nproc := runtime.NumCPU()
+	tasks := make(chan string)
+	results := make(chan BuildResult)
+	var wg sync.WaitGroup
+
+	// Start workers
+	for i := 0; i < nproc; i++ {
+		wg.Add(1)
+		go worker(tinygo, tasks, results, &wg)
+	}
+
+	// Assign tasks
+	go func() {
+		for _, dir := range dirs {
+			tasks <- dir
+		}
+		close(tasks) // close channel signals workers to exit when done
+	}()
+
+	// Collect results
+	go func() {
+		wg.Wait()
+		close(results) // close results channel after all workers done
+	}()
+
+	for result := range results {
+		if result.err != nil {
 			break
 		}
-		switch result {
-		case BuildResultExclude:
-			status.excluded = append(status.excluded, dir)
-		case BuildResultFailed:
-			status.failing = append(status.failing, dir)
-		case BuildResultSuccess:
-			status.passing = append(status.passing, dir)
+		switch result.code {
+			case BuildCodeExclude:
+				status.excluded = append(status.excluded, result.dir)
+			case BuildCodeFailed:
+				status.failing = append(status.failing, result.dir)
+			case BuildCodeSuccess:
+				status.passing = append(status.passing, result.dir)
 		}
 	}
 	return

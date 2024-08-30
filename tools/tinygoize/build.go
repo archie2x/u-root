@@ -11,13 +11,13 @@ import (
 	"strings"
 )
 
-type BuildResult int
+type BuildCode int
 
 const (
-	BuildResultSuccess BuildResult = iota
-	BuildResultFailed
-	BuildResultExclude
-	BuildResultFatal
+	BuildCodeSuccess BuildCode = iota
+	BuildCodeFailed
+	BuildCodeExclude
+	BuildCodeFatal
 )
 
 // Additional tags required for specific commands. Assume command names unique
@@ -65,7 +65,7 @@ func isExcluded(dir string) bool {
 }
 
 // "tinygo build" in directory 'dir'
-func build(tinygo *string, dir string) (BuildResult, error) {
+func build(tinygo *string, dir string) (BuildCode, error) {
 	log.Printf("%s Building...\n", dir)
 
 	tags := []string{"tinygo.enable"}
@@ -80,15 +80,15 @@ func build(tinygo *string, dir string) (BuildResult, error) {
 	if err != nil {
 		berr, ok := err.(*exec.ExitError)
 		if !ok {
-			return BuildResultFatal, err
+			return BuildCodeFatal, err
 		}
 		if isExcluded(dir) {
 			log.Printf("%v EXCLUDED\n", dir)
-			return BuildResultExclude, nil
+			return BuildCodeExclude, nil
 		}
 		log.Printf("%v FAILED %v\n", dir, berr)
-		return BuildResultFailed, nil
+		return BuildCodeFailed, nil
 	}
 	log.Printf("%v PASS\n", dir)
-	return BuildResultSuccess, nil
+	return BuildCodeSuccess, nil
 }
