@@ -65,8 +65,13 @@ func isExcluded(dir string) bool {
 }
 
 // "tinygo build" in directory 'dir'
-func build(tinygo *string, dir string) (BuildCode, error) {
-	log.Printf("%s Building...\n", dir)
+func build(id int, tinygo *string, dir string) (BuildCode, error) {
+
+	wlog := func(format string, args ...interface{}) {
+		log.Printf("[%d] "+format, append([]interface{}{id}, args...)...)
+	}
+
+	wlog("%s Building...\n", dir)
 
 	tags := []string{"tinygo.enable"}
 	if addTags := buildTags(dir); addTags != "" {
@@ -83,12 +88,12 @@ func build(tinygo *string, dir string) (BuildCode, error) {
 			return BuildCodeFatal, err
 		}
 		if isExcluded(dir) {
-			log.Printf("%v EXCLUDED\n", dir)
+			wlog("%v EXCLUDED\n", dir)
 			return BuildCodeExclude, nil
 		}
-		log.Printf("%v FAILED %v\n", dir, berr)
+		wlog("%v FAILED %v\n", dir, berr)
 		return BuildCodeFailed, nil
 	}
-	log.Printf("%v PASS\n", dir)
+	wlog("%v PASS\n", dir)
 	return BuildCodeSuccess, nil
 }

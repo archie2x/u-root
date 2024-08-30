@@ -44,10 +44,10 @@ type BuildResult struct {
 	err      error
 }
 
-func worker(tinygo *string, tasks <-chan string, results chan<- BuildResult, wg *sync.WaitGroup) {
+func worker(id int, tinygo *string, tasks <-chan string, results chan<- BuildResult, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for dir := range tasks {
-		code, err := build(tinygo, dir)
+		code, err := build(id, tinygo, dir)
 		// Send the result back to the main routine
 		results <- BuildResult {
 			dir:      dir,
@@ -58,16 +58,19 @@ func worker(tinygo *string, tasks <-chan string, results chan<- BuildResult, wg 
 }
 
 // "tinygo build" in each of directories 'dirs'
-func buildDirs(tinygo *string, dirs []string) (status BuildStatus, err error) {
-	nproc := runtime.NumCPU()
+func buildDirs(tinygo *string, nWorkers int, dirs []string) (status BuildStatus, err error) {
+	if nWorkers <= 0 {
+		nWorkers = runtime.NumCPU()
+	}
 	tasks := make(chan string)
 	results := make(chan BuildResult)
 	var wg sync.WaitGroup
 
 	// Start workers
-	for i := 0; i < nproc; i++ {
+	log.Printf("Spawning %v workers", nWorkers)
+	for id := 0; id < nWorkers; id++ {
 		wg.Add(1)
-		go worker(tinygo, tasks, results, &wg)
+		go worker(id, tinygo, tasks, results, &wg)
 	}
 
 	// Assign tasks
@@ -164,6 +167,7 @@ The necessary additions to tinygo will be tracked in
 func main() {
 	pathMD := flag.String("o", "-", "Output file for markdown summary, '-' or '' for STDOUT")
 	tinygo := flag.String("tinygo", "tinygo", "Path to tinygo")
+	nWorkers := flag.Int("j", 0, "Allow 'j' jobs at once; NumCPU() jobs with no arg.")
 
 	flag.Parse()
 
@@ -184,7 +188,7 @@ func main() {
 	}
 
 	// generate list of commands that pass / fail / are excluded
-	status, err := buildDirs(tinygo, flag.Args())
+	status, err := buildDirs(tinygo, *nWorkers, flag.Args())
 	if nil != err {
 		log.Fatal(err)
 	}
