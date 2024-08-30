@@ -73,7 +73,7 @@ jobs:
           SHELL = /bin/bash
           all: $(DIRS)
           $(DIRS):
-            cd $@
+            @cd $@
             ${CMD}
             ECODE=$$?
             if [[ "${FAILING}" =~ "$@" ]]; then
@@ -89,6 +89,6 @@ jobs:
           -f /tmp/GNUmakefile \
           -k \
           -j $(nproc) \
-          FAILING=$FAILING \
+          FAILING="$FAILING" \
           DIRS="`echo cmds/{boot,core,exp,extra}/*`" \
           CMD="GOOS=linux GOARCH=amd64 tinygo build -tags noasm"
