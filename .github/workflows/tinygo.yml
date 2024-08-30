@@ -12,6 +12,7 @@ env:
     cmds/boot/boot
     cmds/boot/fitboot
     cmds/boot/pxeboot
+    cmds/core/bind
     cmds/core/dhclient
     cmds/core/gosh
     cmds/core/init
@@ -56,14 +57,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v4
+        with:
+          go-version: '1.22.x'
       - uses: acifani/setup-tinygo@v2
         with:
           tinygo-version: '0.33.0'
 
       - name: Passes Compile
         run: |
-
-          /bin/bash --version
 
           cat << 'EOF' > /tmp/GNUmakefile
           space := $(eval) $(eval)
@@ -83,7 +85,6 @@ jobs:
             fi
           EOF
           perl -pi -e 's/^\s{2}/\t/' /tmp/GNUmakefile
-          cat /tmp/GNUmakefile
 
           make \
           -f /tmp/GNUmakefile \
