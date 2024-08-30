@@ -67,31 +67,8 @@ jobs:
       - name: Compile All and Check Expectation
         run: |
 
-          # Build all cmds in parallel (up to nproc), check expected results
-          cat << 'EOF' > /tmp/GNUmakefile
-          space := $(eval) $(eval)
-          FAILING := $(subst $(space),|,$(strip $(FAILING)))
-          .ONESHELL:
-          .PHONY: all $(DIRS)
-          SHELL = /bin/bash
-          all: $(DIRS)
-          $(DIRS):
-            @cd $@
-            ${CMD}
-            ECODE=$$?
-            if [[ "${FAILING}" =~ "$@" ]]; then
-              [[ $${ECODE} != 0 ]] || exit 1
-            else
-              [[ $${ECODE} == 0 ]] || exit 1
-            fi
-          EOF
-          # make needs leading tabs in recipes
-          perl -pi -e 's/^\s{2}/\t/' /tmp/GNUmakefile
+          go run tools/tinygoize/main.go \
+            -o $GITHUB_STEP_SUMMARY \
+            cmds/{core,exp,extra,boot}/*
 
-          make \
-          -f /tmp/GNUmakefile \
-          -k \
-          -j $(nproc) \
-          FAILING="$FAILING" \
-          DIRS="`echo cmds/{boot,core,exp,extra}/*`" \
-          CMD="GOOS=linux GOARCH=amd64 tinygo build -tags noasm,tinygo.enable"
+          git diff-files --quiet
