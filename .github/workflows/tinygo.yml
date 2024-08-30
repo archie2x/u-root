@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     strategy:
@@ -24,6 +28,7 @@ jobs:
       - name: Run tinygoize
         run: |
 
+          # run tinygoize, check tree not dirty afterward
           go build -C tools/tinygoize
           tools/tinygoize/tinygoize \
             -o $GITHUB_STEP_SUMMARY \
