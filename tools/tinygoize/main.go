@@ -1,4 +1,4 @@
-// Copyright 2017-2018 the u-root Authors. All rights reserved
+// Copyright 2017-2024 the u-root Authors. All rights reserved
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -10,46 +10,15 @@
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/printer"
-	"go/token"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 )
-
-const (
-	goBuild    = "//go:build "
-	constraint = "!tinygo || tinygo.enable"
-)
-
-// Additional tags required for specific commands. Assume command names unique
-// despite being in different directories.
-var addBuildTags = map[string]string{
-	"gzip":     "noasm",
-	"insmod":   "noasm",
-	"rmmod":    "noasm",
-	"bzimage":  "noasm",
-	"kconf":    "noasm",
-	"modprobe": "noasm",
-	"console":  "noasm",
-	"init":     "noasm",
-}
-
-// returns the needed build-tags for a given package
-func buildTags(dir string) (tags string) {
-	parts := strings.Split(dir, "/")
-	cmd := parts[len(parts)-1]
-	return addBuildTags[cmd]
-}
 
 // Track set of passing, failing, and excluded commands
 type BuildStatus struct {
@@ -67,160 +36,20 @@ func tinygoVersion(tinygo *string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-// check (via `go build -n`) if a given directory would have been skipped
-// due to build constraints (e.g. cmds/core/bind only builds for plan9)
-func isExcluded(dir string) bool {
-	// too lazy to dynamically pull tags from `tinygo info`
-	tags := []string{
-		"tinygo",
-		"tinygo.enable",
-		"purego",
-		"osusergo",
-		"math_big_pure_go",
-		"gc.precise",
-		"scheduler.tasks",
-		"serial.none",
-	}
-	c := exec.Command("go", "build",
-		"-n",
-		"-tags", strings.Join(tags, ","),
-	)
-	c.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64")
-	c.Dir = dir
-	out, _ := c.CombinedOutput()
-	return strings.Contains(string(out), "build constraints exclude all Go files in")
-}
-
-// "tinygo build" in directory 'dir'
-func build(tinygo *string, dir string) (err error) {
-	tags := []string{"tinygo.enable"}
-	if addTags := buildTags(dir); addTags != "" {
-		tags = append(tags, addTags)
-	}
-	c := exec.Command(*tinygo, "build", "-tags", strings.Join(tags, ","))
-	c.Dir = dir
-	c.Stdout, c.Stderr = os.Stdout, os.Stderr
-	c.Env = append(os.Environ(), "GOOS=linux", "CGO_ENABLED=0", "GOARCH=amd64")
-	return c.Run()
-}
-
 // "tinygo build" in each of directories 'dirs'
 func buildDirs(tinygo *string, dirs []string) (status BuildStatus, err error) {
 	for _, dir := range dirs {
-		log.Printf("%s Building...\n", dir)
-		err = build(tinygo, dir)
-		if err == nil {
-			log.Printf("%v PASS\n", dir)
+		result, err := build(tinygo, dir)
+		if err != nil {
+			break
+		}
+		switch result {
+		case BuildResultExclude:
+			status.excluded = append(status.excluded, dir)
+		case BuildResultFailed:
+			status.failing = append(status.failing, dir)
+		case BuildResultSuccess:
 			status.passing = append(status.passing, dir)
-		} else {
-			berr, ok := err.(*exec.ExitError)
-			if !ok {
-				break
-			}
-			err = nil
-			if isExcluded(dir) {
-				log.Printf("%v EXCLUDED\n", dir)
-				status.excluded = append(status.excluded, dir)
-			} else {
-				log.Printf("%v FAILED %v\n", dir, berr)
-				status.failing = append(status.failing, dir)
-			}
-		}
-	}
-	return
-}
-
-// Modifies, adds, or removes //go:build line as appropriate to include / remove
-// '!tinygo || tinygo.enable' for all .go files in dir depending on whether it
-// 'builds' or not as previously tested.
-func fixupConstraints(dir string, builds bool) (err error) {
-	p := printer.Config{Mode: printer.UseSpaces | printer.TabIndent, Tabwidth: 8}
-
-	files, err := filepath.Glob(filepath.Join(dir, "*"))
-	if err != nil {
-		log.Fatal(err)
-	}
-nextFile:
-	for _, file := range files {
-		if !strings.HasSuffix(file, ".go") {
-			continue
-		}
-		log.Printf("Process %s", file)
-		b, err := os.ReadFile(file)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fset := token.NewFileSet() // positions are relative to fset
-		f, err := parser.ParseFile(fset, file, string(b), parser.ParseComments|parser.SkipObjectResolution)
-		if err != nil {
-			log.Fatalf("parsing\n%v\n:%v", string(b), err)
-		}
-
-		goBuildPresent := false
-
-	done:
-		// modify existing //go:build line
-		for _, cg := range f.Comments {
-			for _, c := range cg.List {
-				if !strings.HasPrefix(c.Text, goBuild) {
-					continue
-				}
-				goBuildPresent = true
-
-				contains := strings.Contains(c.Text, constraint)
-
-				if (builds && !contains) || (!builds && contains) {
-					log.Printf("Skipped, constraint up-to-date: %s\n", file)
-					continue nextFile
-				}
-
-				if builds {
-					re := regexp.MustCompile(`\(?\s*!tinygo\s+\|\|\s+tinygo.enable\s*\)?(\s+\&\&)?`)
-					c.Text = re.ReplaceAllString(c.Text, "")
-					log.Printf("Stripping build constraint %v\n", file)
-
-					// handle potentially now-empty build constraint
-					re = regexp.MustCompile(`^\s*//go:build\s*$`)
-					if re.MatchString(c.Text) {
-						filtered := []*ast.Comment{}
-						for _, comment := range cg.List {
-							if !re.MatchString(comment.Text) {
-								filtered = append(filtered, comment)
-							}
-						}
-						cg.List = filtered
-					}
-				} else {
-					c.Text = goBuild + "(" + constraint + ") && (" + c.Text[len(goBuild):] + ")"
-				}
-				break done
-			}
-		}
-
-		if !builds && !goBuildPresent {
-			// no //go:build line found: insert one
-			var cg ast.CommentGroup
-			cg.List = append(cg.List, &ast.Comment{Text: goBuild + constraint})
-
-			if len(f.Comments) > 0 {
-				// insert //go:build after first comment
-				// group, assumed copyright. Doesn't seem
-				// quite right but seems to work.
-				cg.List[0].Slash = f.Comments[0].List[0].Slash + 1
-				f.Comments = append([]*ast.CommentGroup{f.Comments[0], &cg}, f.Comments[1:]...)
-			} else {
-				// prepend //go:build
-				f.Comments = append([]*ast.CommentGroup{&cg}, f.Comments...)
-			}
-		}
-
-		// Complete source file.
-		var buf bytes.Buffer
-		if err = p.Fprint(&buf, fset, f); err != nil {
-			log.Fatalf("Printing:%v", err)
-		}
-		if err := os.WriteFile(file, buf.Bytes(), 0o644); err != nil {
-			log.Fatal(err)
 		}
 	}
 	return
@@ -238,7 +67,7 @@ func writeMarkdown(file *os.File, pathMD *string, tgVersion *string, status Buil
 This document aims to track the process of enabling all u-root commands
 to be built using tinygo. It will be updated as more commands can be built via:
 
-    u-root> go run tools/tinygoize/main.go cmds/{core,exp,extra}/*
+    u-root> go run tools/tinygoize/* cmds/{core,exp,extra}/*
 
 Commands that cannot be built with tinygo have a \"(!tinygo || tinygo.enable)\"
 build constraint. Specify the "tinygo.enable" build tag to attempt to build
@@ -288,18 +117,16 @@ The necessary additions to tinygo will be tracked in
 }
 
 func main() {
-	pathMD := flag.String("o", "tools/tinygoize/README.md", "Output file for markdown summary, '-' or '' for STDOUT")
+	pathMD := flag.String("o", "-", "Output file for markdown summary, '-' or '' for STDOUT")
 	tinygo := flag.String("tinygo", "tinygo", "Path to tinygo")
 
 	flag.Parse()
 
-	var err error
 	tgVersion, err := tinygoVersion(tinygo)
-	log.Printf("%s\n", tgVersion)
-
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Printf("%s\n", tgVersion)
 
 	file := os.Stdout
 	if len(*pathMD) > 0 && *pathMD != "-" {
