@@ -13,8 +13,6 @@ concurrency:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,10 +25,10 @@ jobs:
 
       - name: Run tinygoize
         run: |
-
-          # run tinygoize, check tree not dirty afterward
+          # tinygoize, check tree not dirty
           go build -C tools/tinygoize
           tools/tinygoize/tinygoize \
+            -j 2 \
             -o $GITHUB_STEP_SUMMARY \
             cmds/{core,exp,extra,boot}/*
 
