@@ -1,0 +1,33 @@
+---
+name: TinyGo-Dev
+
+on:
+  push:
+    branches: [main, tinygo-dev-ci]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # - uses: actions/checkout@v4
+      # - uses: actions/setup-go@v4
+      #   with:
+      #     go-version: '1.23.x'
+
+      - uses: actions/download-artifact@v4
+        with:
+          workflow: linux
+          name: linux-amd64-double-zipped
+          repo: tinygo-org/tinygo
+          path: /tmp/foo
+          github-token: ${{ secrets.TINYGO_TOKEN }}
+
+      - name: ls
+        run: |
+          ls /tmp/foo
