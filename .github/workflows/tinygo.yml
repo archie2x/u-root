@@ -36,4 +36,4 @@ jobs:
           md5sum /tmp/foo/*
           sudo dpkg -i /tmp/foo/*.deb
           which tinygo
-          tinygo --version
+          tinygo version
