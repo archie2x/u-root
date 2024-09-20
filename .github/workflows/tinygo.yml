@@ -24,7 +24,7 @@ jobs:
         with:
           # ['name', 'path', 'pattern', 'merge-multiple', 'github-token', 'repository', 'run-id']
           # workflow: linux
-          name: linux-amd64-double-zipped
+          # name: linux-amd64-double-zipped
           repository: tinygo-org/tinygo
           path: /tmp/foo
           github-token: ${{ secrets.TINYGO_TOKEN }}
