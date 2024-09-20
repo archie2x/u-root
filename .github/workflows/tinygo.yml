@@ -34,4 +34,6 @@ jobs:
         run: |
           ls -alh /tmp/foo
           md5sum /tmp/foo/*
-          dpkg -i /tmp/foo/*.deb
+          sudo dpkg -i /tmp/foo/*.deb
+          which tinygo
+          tinygo --version
