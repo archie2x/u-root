@@ -33,3 +33,5 @@ jobs:
       - name: ls
         run: |
           ls -alh /tmp/foo
+          md5sum /tmp/foo/*
+          dpkg -i /tmp/foo/*.deb
