@@ -22,14 +22,14 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          # ['name', 'path', 'pattern', 'merge-multiple', 'github-token', 'repository', 'run-id']
-          # workflow: linux
-          # name: linux-amd64-double-zipped
-          repository: tinygo-org/tinygo
+          name: linux-amd64-double-zipped
           path: /tmp/foo
+          # pattern:
+          # merge-multiple:
           github-token: ${{ secrets.TINYGO_TOKEN }}
+          repository: tinygo-org/tinygo
           run-id: 10920552472
 
       - name: ls
         run: |
-          ls /tmp/foo
+          ls -alh /tmp/foo
