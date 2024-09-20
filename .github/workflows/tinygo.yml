@@ -28,7 +28,7 @@ jobs:
           repository: tinygo-org/tinygo
           path: /tmp/foo
           github-token: ${{ secrets.TINYGO_TOKEN }}
-          run-id: 1947262021
+          run-id: 10920552472
 
       - name: ls
         run: |
