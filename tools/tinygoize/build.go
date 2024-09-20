@@ -20,8 +20,14 @@ const (
 	BuildCodeFatal
 )
 
-// Additional tags required for specific commands. Assume command names unique
-// despite being in different directories.
+type BuildRes struct {
+	err *exec.ExitError
+	excluded bool
+	output []byte
+}
+
+// Additional tags required for specific commands. Assumes command names are
+// unique despite being in different directories.
 var addBuildTags = map[string]string{
 	"gzip":     "noasm",
 	"insmod":   "noasm",
@@ -33,7 +39,7 @@ var addBuildTags = map[string]string{
 	"init":     "noasm",
 }
 
-// returns the needed build-tags for a given package
+// Returns the needed build-tags for a given package
 func buildTags(dir string) (tags string) {
 	parts := strings.Split(dir, "/")
 	cmd := parts[len(parts)-1]
@@ -65,35 +71,38 @@ func isExcluded(dir string) bool {
 }
 
 // "tinygo build" in directory 'dir'
-func build(id int, tinygo *string, dir string) (BuildCode, error) {
-
+func build(id int, tinygo *string, dir string) (res BuildRes, err error) {
 	wlog := func(format string, args ...interface{}) {
 		log.Printf("[%d] "+format, append([]interface{}{id}, args...)...)
 	}
-
 	wlog("%s Building...\n", dir)
-
 	tags := []string{"tinygo.enable"}
 	if addTags := buildTags(dir); addTags != "" {
 		tags = append(tags, addTags)
 	}
-	c := exec.Command(*tinygo, "build", "-tags", strings.Join(tags, ","))
-	c.Dir = dir
-	c.Stdout, c.Stderr = os.Stdout, os.Stderr
-	c.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64")
-	err := c.Run()
+	cmd := exec.Command(*tinygo, "build", "-tags", strings.Join(tags, ","))
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64")
+	cmd.Dir = dir
+	res.output, err = cmd.CombinedOutput()
 	if err != nil {
-		berr, ok := err.(*exec.ExitError)
+		var ok bool
+		res.err, ok = err.(*exec.ExitError)
 		if !ok {
-			return BuildCodeFatal, err
+			return
 		}
+		err = nil
 		if isExcluded(dir) {
 			wlog("%v EXCLUDED\n", dir)
-			return BuildCodeExclude, nil
+			res.excluded = true
+			return
 		}
-		wlog("%v FAILED %v\n", dir, berr)
-		return BuildCodeFailed, nil
+		lines := strings.Split(string(res.output), "\n")
+		for _,line := range lines {
+			wlog(line)
+		}
+		wlog("%v FAILED %v\n", dir, res.err)
+		return
 	}
 	wlog("%v PASS\n", dir)
-	return BuildCodeSuccess, nil
+	return
 }

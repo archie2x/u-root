@@ -14,20 +14,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"io"
 	"os/exec"
-	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"runtime"
+	"golang.org/x/term"
 )
 
-// Track set of passing, failing, and excluded commands
-type BuildStatus struct {
-	passing  []string
-	failing  []string
-	excluded []string
-}
 
 // return trimmed output of "tinygo version"
 func tinygoVersion(tinygo *string) (string, error) {
@@ -38,44 +32,76 @@ func tinygoVersion(tinygo *string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
-type BuildResult struct {
-	dir      string
-	code     BuildCode
-	err      error
+func progress(nComplete int, outOf int) {
+	isTerminal := term.IsTerminal(int(os.Stdin.Fd()))
+	if isTerminal {
+		fmt.Printf("\033[2K\r")
+	}
+	percent := 100 * ( float64(nComplete) / float64(outOf))
+	fmt.Printf("%v/%v %.2f%%", nComplete, outOf, percent)
+	if !isTerminal || nComplete == outOf {
+		fmt.Println()
+	}
 }
 
-func worker(id int, tinygo *string, tasks <-chan string, results chan<- BuildResult, wg *sync.WaitGroup) {
-	defer wg.Done()
+// Track set of passing, failing, and excluded commands
+type BuildStatus struct {
+	passing  []string
+	failing  []string
+	excluded []string
+	modified []string
+}
+
+type WorkerResult struct {
+	dir string
+	buildRes BuildRes
+	didWork  bool // whether files in the package need(ed) constraint update
+	err error
+}
+
+func worker(id int, conf *Config, tasks <-chan string, results chan<- WorkerResult, workGroup *sync.WaitGroup) {
+	defer workGroup.Done()
 	for dir := range tasks {
-		code, err := build(id, tinygo, dir)
-		// Send the result back to the main routine
-		results <- BuildResult {
-			dir:      dir,
-			code:      code,
-			err:      err,
+		br, err := build(id, &conf.tinygo, dir)
+		var dw bool
+		if err == nil && !br.excluded {
+			dw, err = fixupPkgConstraints(dir, br.err == nil, conf.checkOnly)
+		}
+
+		// send result back to main routine
+		results <- WorkerResult {
+			dir: dir,
+			buildRes: br,
+			didWork: dw,
+			err: err,
 		}
 	}
 }
 
 // "tinygo build" in each of directories 'dirs'
-func buildDirs(tinygo *string, nWorkers int, dirs []string) (status BuildStatus, err error) {
-	if nWorkers <= 0 {
+func buildDirs(conf *Config) (status BuildStatus, err error) {
+	jobs := len(conf.dirs)
+	nWorkers := conf.nWorkers
+	if conf.nWorkers <= 0 {
 		nWorkers = runtime.NumCPU()
 	}
+	if nWorkers > jobs {
+		nWorkers = jobs
+	}
 	tasks := make(chan string)
-	results := make(chan BuildResult)
+	results := make(chan WorkerResult)
 	var wg sync.WaitGroup
 
 	// Start workers
 	log.Printf("Spawning %v workers", nWorkers)
 	for id := 0; id < nWorkers; id++ {
 		wg.Add(1)
-		go worker(id, tinygo, tasks, results, &wg)
+		go worker(id+1, conf, tasks, results, &wg)
 	}
 
 	// Assign tasks
 	go func() {
-		for _, dir := range dirs {
+		for _, dir := range conf.dirs {
 			tasks <- dir
 		}
 		close(tasks) // close channel signals workers to exit when done
@@ -87,99 +113,52 @@ func buildDirs(tinygo *string, nWorkers int, dirs []string) (status BuildStatus,
 		close(results) // close results channel after all workers done
 	}()
 
+	nComplete := 0
 	for result := range results {
+		nComplete += 1
+		progress(nComplete, jobs)
+
 		if result.err != nil {
 			break
 		}
-		switch result.code {
-			case BuildCodeExclude:
-				status.excluded = append(status.excluded, result.dir)
-			case BuildCodeFailed:
-				status.failing = append(status.failing, result.dir)
-			case BuildCodeSuccess:
-				status.passing = append(status.passing, result.dir)
+		if result.buildRes.excluded {
+			status.excluded = append(status.excluded, result.dir)
+		} else if result.buildRes.err != nil {
+			status.failing = append(status.failing, result.dir)
+		} else {
+			status.passing = append(status.passing, result.dir)
+		}
+		if result.didWork {
+			status.modified = append(status.modified, result.dir)
 		}
 	}
-	return
-}
-
-func writeMarkdown(file *os.File, pathMD *string, tgVersion *string, status BuildStatus) (err error) {
-	// (not string literal because conflict with markdown back-tick)
-	fmt.Fprintf(file, "---\n\n")
-	fmt.Fprintf(file, "DO NOT EDIT.\n\n")
-	fmt.Fprintf(file, "Generated via `go run tools/tinygoize/main.go`\n\n")
-	fmt.Fprintf(file, "%v\n\n", *tgVersion)
-	fmt.Fprintf(file, "---\n\n")
-
-	fmt.Fprintf(file, `# Status of u-root + tinygo
-This document aims to track the process of enabling all u-root commands
-to be built using tinygo. It will be updated as more commands can be built via:
-
-    u-root> go run tools/tinygoize/* cmds/{core,exp,extra}/*
-
-Commands that cannot be built with tinygo have a \"(!tinygo || tinygo.enable)\"
-build constraint. Specify the "tinygo.enable" build tag to attempt to build
-them.
-
-    tinygo build -tags tinygo.enable cmds/core/ls
-
-The list below is the result of building each command for Linux, x86_64.
-
-The necessary additions to tinygo will be tracked in
-[#2979](https://github.com/u-root/u-root/issues/2979).
-
----
-
-## Commands Build Status
-`)
-
-	linkText := func(dir string) string {
-		// ignoring err here because pathMD already opened(exists) and
-		// dir already checked
-		relPath, _ := filepath.Rel(filepath.Dir(*pathMD), dir)
-		return fmt.Sprintf("[%v](%v)", dir, relPath)
-	}
-
-	processSet := func(header string, dirs []string) {
-		fmt.Fprintf(file, "\n### %v (%v commands)\n", header, len(dirs))
-		sort.Strings(dirs)
-
-		if len(dirs) == 0 {
-			fmt.Fprintf(file, "NONE\n")
-		}
-		for _, dir := range dirs {
-			msg := fmt.Sprintf(" - %v", linkText(dir))
-			tags := buildTags(dir)
-			if len(tags) > 0 {
-				msg += fmt.Sprintf(" tags: %v", tags)
-			}
-			fmt.Fprintf(file, "%v\n", msg)
-		}
-	}
-
-	processSet("EXCLUDED", status.excluded)
-	processSet("FAILING", status.failing)
-	processSet("PASSING", status.passing)
-
 	return
 }
 
 func main() {
-	pathMD := flag.String("o", "-", "Output file for markdown summary, '-' or '' for STDOUT")
-	tinygo := flag.String("tinygo", "tinygo", "Path to tinygo")
-	nWorkers := flag.Int("j", 0, "Allow 'j' jobs at once; NumCPU() jobs with no arg.")
+	conf := Config{}
+	flag.StringVar(&conf.pathMD, "o", "-", "Output file for markdown summary, '-' or '' for STDOUT")
+	flag.StringVar(&conf.tinygo, "tinygo", "tinygo", "Path to tinygo")
+	flag.IntVar(&conf.nWorkers, "j", 0, "Allow 'j' jobs at once; NumCPU() jobs with no arg.")
+	flag.BoolVar(&conf.checkOnly, "n", false, "Check-only, do not modify sources")
+	flag.BoolVar(&conf.verbose, "v", false, "Verbose")
 
 	flag.Parse()
+	conf.dirs = flag.Args()
 
-	tgVersion, err := tinygoVersion(tinygo)
+	if !conf.verbose {
+		log.SetOutput(io.Discard)
+	}
+
+	tgVersion, err := tinygoVersion(&conf.tinygo)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("%s\n", tgVersion)
 
 	file := os.Stdout
-	if len(*pathMD) > 0 && *pathMD != "-" {
-		file, err = os.Create(*pathMD)
+	if len(conf.pathMD) > 0 && conf.pathMD != "-" {
+		file, err = os.Create(conf.pathMD)
 		if err != nil {
 			fmt.Printf("Error creating opening file: %v\n", err)
 			os.Exit(1)
@@ -188,30 +167,46 @@ func main() {
 	}
 
 	// generate list of commands that pass / fail / are excluded
-	status, err := buildDirs(tinygo, *nWorkers, flag.Args())
+	status, err := buildDirs(&conf)
 	if nil != err {
 		log.Fatal(err)
 	}
 
 	// fix-up constraints in failing files
-	for _, f := range status.failing {
-		err = fixupConstraints(f, false)
-		if nil != err {
-			log.Fatal(err)
-		}
-	}
+	// for _, f := range status.failing {
+	// 	dw, err := fixupPkgConstraints(f, false, conf.checkOnly)
+	// 	if nil != err {
+	// 		log.Fatal(err)
+	// 	}
+	// 	if dw {
+	// 		modified = append(modified, f)
+	// 	}
+	// }
 
-	// fix-up constraints in passing files
-	for _, f := range status.passing {
-		err = fixupConstraints(f, true)
-		if nil != err {
-			log.Fatal(err)
-		}
-	}
+	// // fix-up constraints in passing files
+	// for _, f := range status.passing {
+	// 	dw, err := fixupPkgConstraints(f, true, conf.checkOnly)
+	// 	if nil != err {
+	// 		log.Fatal(err)
+	// 	}
+	// 	if dw {
+	// 		modified = append(modified, f)
+	// 	}
+	// }
 
 	// write markdown output
-	err = writeMarkdown(file, pathMD, &tgVersion, status)
+	err = writeMarkdown(file, &conf.pathMD, &tgVersion, status)
 	if nil != err {
 		log.Fatal(err)
+	}
+
+	if len(status.modified) > 0 {
+		fmt.Println("Updates required in package(s):")
+		for _,modded := range status.modified {
+			fmt.Println(modded)
+		}
+		os.Exit(1)
+	} else {
+		fmt.Println("Build constraints up to date.")
 	}
 }
