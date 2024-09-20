@@ -28,7 +28,10 @@ jobs:
           # merge-multiple:
           github-token: ${{ secrets.TINYGO_TOKEN }}
           repository: tinygo-org/tinygo
-          run-id: 10920552472
+          run-id: 10920552472 # sha: dcca47f1f6088ea2565468e4a93a96e4308af480
+
+          # additional dev builds can be discovered via (things like):
+          # gh api /repos/tinygo-org/tinygo/actions/artifacts\?name=linux-amd64-double-zipped
 
       - name: ls
         run: |
